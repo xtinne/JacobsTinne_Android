@@ -3,7 +3,6 @@ package be.ap.edu.jacobstinne_android;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
-import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Build;
@@ -44,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
     private String url = "http://datasets.antwerpen.be/v4/gis/bibliotheekoverzicht.json";
     private JSONObject bibliotheken;
     final ArrayList<OverlayItem> items = new ArrayList<OverlayItem>();
+    MySQLiteHelper helper;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +53,8 @@ public class MainActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= 23) {
             checkPermissions();
         }
+
+        helper = new MySQLiteHelper(this);
 
         // https://github.com/osmdroid/osmdroid/wiki/How-to-use-the-osmdroid-library
         mapView = (MapView) findViewById(R.id.mapview);
@@ -66,25 +68,31 @@ public class MainActivity extends AppCompatActivity {
         // http://code.tutsplus.com/tutorials/an-introduction-to-volley--cms-23800
         mRequestQueue = Volley.newRequestQueue(this);
 
-        // A JSONObject to post with the request. Null is allowed and indicates no parameters will be posted along with request.
-        JSONObject obj = null;
-        // Alle bibliotheken ophalen
-        JsonObjectRequest jr = new JsonObjectRequest(Request.Method.GET, url, obj, new Response.Listener<JSONObject>() {
-            @Override
-            public void onResponse(JSONObject response) {
-                bibliotheken = response;
-                CreateMarkers(bibliotheken);
-
-                Log.d("edu.ap.maps", bibliotheken.toString());
-            }
-        }, new Response.ErrorListener() {
-            @Override
-            public void onErrorResponse(VolleyError error) {
-                Log.e("be.ap.edu.mapsaver", error.getMessage());
-            }
-        });
-        mRequestQueue.add(jr);
+        List<String> allBib = helper.getAll();
+        if (allBib.isEmpty()) {
+            Log.i("Empty", "Lijst bibliotheken is leeg.");
+            // A JSONObject to post with the request. Null is allowed and indicates no parameters will be posted along with request.
+            JSONObject obj = null;
+            // Alle bibliotheken ophalen
+            JsonObjectRequest jr = new JsonObjectRequest(Request.Method.GET, url, obj, new Response.Listener<JSONObject>() {
+                @Override
+                public void onResponse(JSONObject response) {
+                    bibliotheken = response;
+                    CreateMarkers(bibliotheken);
+                }
+            }, new Response.ErrorListener() {
+                @Override
+                public void onErrorResponse(VolleyError error) {
+                    Log.e("be.ap.edu.mapsaver", error.getMessage());
+                }
+            });
+            mRequestQueue.add(jr);
+        } else {
+            Log.i("Not empty", "Lijst bibliotheken is niet leeg.");
+            CreateMarkersSQLite(allBib);
+        }
     }
+
 
     private void CreateMarkers(JSONObject bibliotheken) {
         try {
@@ -92,13 +100,15 @@ public class MainActivity extends AppCompatActivity {
 
             for (int i = 0; i < alleBibliotheken.length(); i++) {
                 JSONObject obj = (JSONObject)alleBibliotheken.get(i);
-                Log.d("edu.ap.maps", obj.toString());
 
+                String naam = obj.getString("naam");
                 Double point_lat = obj.getDouble("point_lat");
                 Double point_lng = obj.getDouble("point_lng");
                 GeoPoint g = new GeoPoint(point_lat, point_lng);
 
-                addMarker(g);
+                addMarker(naam, g);
+
+                helper.addBib(naam, point_lat, point_lng);
             }
         }
         catch (Exception e) {
@@ -106,8 +116,26 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void addMarker(GeoPoint g) {
-        OverlayItem myLocationOverlayItem = new OverlayItem("Here", "Current Position", g);
+    private void CreateMarkersSQLite(List<String> bibliothekenList) {
+            try {
+                for (String bibliotheek : bibliothekenList) {
+                    String[] bib = bibliotheek.split(",");
+
+                    String naam = String.valueOf(bib[0]);
+                    Double point_lat = Double.valueOf(bib[1]);
+                    Double point_lng = Double.valueOf(bib[2]);
+                    GeoPoint g = new GeoPoint(point_lat, point_lng);
+
+                    addMarker(naam, g);
+                }
+            }
+            catch (Exception e) {
+                Log.e("edu.ap.maps", e.getMessage());
+            }
+    }
+
+    private void addMarker(String naam, GeoPoint g) {
+        OverlayItem myLocationOverlayItem = new OverlayItem(naam, "Current Position", g);
         Drawable myCurrentLocationMarker = ResourcesCompat.getDrawable(getResources(), R.drawable.marker_default, null);
         myLocationOverlayItem.setMarker(myCurrentLocationMarker);
 
@@ -117,6 +145,7 @@ public class MainActivity extends AppCompatActivity {
         ItemizedIconOverlay<OverlayItem> currentLocationOverlay = new ItemizedIconOverlay<>(items,
                 new ItemizedIconOverlay.OnItemGestureListener<OverlayItem>() {
                     public boolean onItemSingleTapUp(final int index, final OverlayItem item) {
+                        Toast.makeText(getBaseContext(), item.getTitle(), Toast.LENGTH_SHORT).show();
                         return true;
                     }
                     public boolean onItemLongPress(final int index, final OverlayItem item) {
@@ -126,7 +155,6 @@ public class MainActivity extends AppCompatActivity {
         this.mapView.getOverlays().add(currentLocationOverlay);
         this.mapView.invalidate();
     }
-
 
 
     // START PERMISSION CHECK
